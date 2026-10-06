@@ -26,7 +26,7 @@
  static int activity_event_listener(const zmk_event_t *eh) { return note_activity(); }
  
  void activity_work_handler(struct k_work *work) {
-+    // Activity may stay IDLE while USB power is plugged in or removed.
++    // Refresh the RGB idle policy independently of the power source.
 +    charybdis_rgb_update_power_state();
      int32_t current = k_uptime_get();
      int32_t inactive_time = current - activity_last_uptime;
@@ -85,7 +85,7 @@
  
              return 0;
          }
-@@ -273,11 +281,9 @@
+@@ -273,11 +281,8 @@
      state.on = zmk_usb_is_powered();
  #endif
  
@@ -94,13 +94,12 @@
 -    }
 -
 -    return 0;
-+    rgb_suspended = !charybdis_vbus_is_powered() &&
-+                    zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE;
++    rgb_suspended = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE;
 +    return rgb_update_output();
  }
  
  int zmk_rgb_underglow_save_state(void) {
-@@ -301,23 +307,17 @@
+@@ -301,23 +306,17 @@
      if (!led_strip)
          return -ENODEV;
  
@@ -128,7 +127,7 @@
      for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
          pixels[i] = (struct led_rgb){r : 0, g : 0, b : 0};
      }
-@@ -327,23 +327,36 @@
+@@ -327,23 +326,36 @@
  
  K_WORK_DEFINE(underglow_off_work, zmk_rgb_underglow_off_handler);
  
@@ -173,7 +172,7 @@
  
      return zmk_rgb_underglow_save_state();
  }
-@@ -462,45 +475,29 @@
+@@ -462,45 +474,28 @@
  
  #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE) ||                                          \
      IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
@@ -194,8 +193,7 @@
 +    if (!led_strip) {
 +        return -ENODEV;
 +    }
-+    bool suspend = !charybdis_vbus_is_powered() &&
-+                   zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE;
++    bool suspend = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE;
 +    if (rgb_suspended == suspend) {
          return 0;
      }
