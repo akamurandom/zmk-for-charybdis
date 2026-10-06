@@ -4,7 +4,7 @@ if(CONFIG_CHARYBDIS_VBUS_POWER)
     message(FATAL_ERROR "VBUS policy requires AUTO_OFF_IDLE=y and AUTO_OFF_USB=n")
   endif()
 
-  find_program(CHARYBDIS_PATCH_EXECUTABLE patch REQUIRED)
+  find_package(Git REQUIRED)
   set(vbus_sources "${CMAKE_CURRENT_BINARY_DIR}/vbus-sources")
   file(MAKE_DIRECTORY "${vbus_sources}")
   foreach(source activity.c rgb_underglow.c)
@@ -14,8 +14,9 @@ if(CONFIG_CHARYBDIS_VBUS_POWER)
       DIRECTORY "${APPLICATION_SOURCE_DIR}" PROPERTIES HEADER_FILE_ONLY TRUE)
   endforeach()
   execute_process(
-    COMMAND "${CHARYBDIS_PATCH_EXECUTABLE}" --batch --fuzz=0 -p1 -d "${vbus_sources}"
-    INPUT_FILE "${CMAKE_CURRENT_LIST_DIR}/patches/zmk-v0.3-vbus.patch"
+    COMMAND "${GIT_EXECUTABLE}" apply --no-index
+      "${CMAKE_CURRENT_LIST_DIR}/patches/zmk-v0.3-vbus.patch"
+    WORKING_DIRECTORY "${vbus_sources}"
     RESULT_VARIABLE patch_result
     OUTPUT_VARIABLE patch_output
     ERROR_VARIABLE patch_error)

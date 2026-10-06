@@ -175,8 +175,8 @@ def main():
         temp = Path(tmp)
         for name in ("activity.c", "rgb_underglow.c"):
             shutil.copyfile(args.zmk_source / name, temp / name)
-        with (root / "module/patches/zmk-v0.3-vbus.patch").open() as patch:
-            subprocess.run(["patch", "--batch", "--fuzz=0", "-p1", "-d", tmp], stdin=patch, check=True)
+        subprocess.run(["git", "apply", "--no-index",
+                        str(root / "module/patches/zmk-v0.3-vbus.patch")], cwd=tmp, check=True)
         rgb = (temp / "rgb_underglow.c").read_text()
         activity = (temp / "activity.c").read_text()
         functions = [function(rgb, name) for name in (

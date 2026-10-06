@@ -173,7 +173,7 @@
  
      return zmk_rgb_underglow_save_state();
  }
-@@ -462,46 +475,30 @@
+@@ -462,45 +475,29 @@
  
  #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE) ||                                          \
      IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
