@@ -1,0 +1,4 @@
+name: charybdis-vbus
+build:
+  cmake: module
+  kconfig: module/Kconfig

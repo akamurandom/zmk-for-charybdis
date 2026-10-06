@@ -1,0 +1,232 @@
+--- a/activity.c
++++ b/activity.c
+@@ -21,6 +21,8 @@
+ #include <zmk/pm.h>
+ 
+ #include <zmk/activity.h>
++#include <charybdis/vbus_power.h>
++#include <charybdis/rgb_power.h>
+ 
+ #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+ #include <zmk/usb.h>
+@@ -31,11 +33,7 @@
+ #endif
+ 
+ bool is_usb_power_present(void) {
+-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+-    return zmk_usb_is_powered();
+-#else
+-    return false;
+-#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) */
++    return charybdis_vbus_is_powered();
+ }
+ 
+ static enum zmk_activity_state activity_state;
+@@ -72,6 +70,8 @@
+ static int activity_event_listener(const zmk_event_t *eh) { return note_activity(); }
+ 
+ void activity_work_handler(struct k_work *work) {
++    // Activity may stay IDLE while USB power is plugged in or removed.
++    charybdis_rgb_update_power_state();
+     int32_t current = k_uptime_get();
+     int32_t inactive_time = current - activity_last_uptime;
+ #if IS_ENABLED(CONFIG_ZMK_SLEEP)
+--- a/rgb_underglow.c
++++ b/rgb_underglow.c
+@@ -25,6 +25,8 @@
+ #include <zmk/events/activity_state_changed.h>
+ #include <zmk/events/usb_conn_state_changed.h>
+ #include <zmk/workqueue.h>
++#include <charybdis/vbus_power.h>
++#include <charybdis/rgb_power.h>
+ 
+ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+ 
+@@ -65,7 +67,12 @@
+ static struct led_rgb pixels[STRIP_NUM_PIXELS];
+ 
+ static struct rgb_underglow_state state;
++// state.on is the user's saved preference; suspension never changes it.
++static bool rgb_suspended;
++static int rgb_update_output(void);
+ 
++static bool rgb_is_lit(void) { return state.on && !rgb_suspended; }
++
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER)
+ static const struct device *const ext_power = DEVICE_DT_GET(DT_INST(0, zmk_ext_power_generic));
+ #endif
+@@ -176,6 +183,9 @@
+ }
+ 
+ static void zmk_rgb_underglow_tick(struct k_work *work) {
++    if (!rgb_is_lit()) {
++        return;
++    }
+     switch (state.current_effect) {
+     case UNDERGLOW_EFFECT_SOLID:
+         zmk_rgb_underglow_effect_solid();
+@@ -200,7 +210,7 @@
+ K_WORK_DEFINE(underglow_tick_work, zmk_rgb_underglow_tick);
+ 
+ static void zmk_rgb_underglow_tick_handler(struct k_timer *timer) {
+-    if (!state.on) {
++    if (!rgb_is_lit()) {
+         return;
+     }
+ 
+@@ -221,9 +231,7 @@
+ 
+         rc = read_cb(cb_arg, &state, sizeof(state));
+         if (rc >= 0) {
+-            if (state.on) {
+-                k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(50));
+-            }
++            rgb_update_output();
+ 
+             return 0;
+         }
+@@ -273,11 +281,9 @@
+     state.on = zmk_usb_is_powered();
+ #endif
+ 
+-    if (state.on) {
+-        k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(50));
+-    }
+-
+-    return 0;
++    rgb_suspended = !charybdis_vbus_is_powered() &&
++                    zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE;
++    return rgb_update_output();
+ }
+ 
+ int zmk_rgb_underglow_save_state(void) {
+@@ -301,23 +307,17 @@
+     if (!led_strip)
+         return -ENODEV;
+ 
+-#if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER)
+-    if (ext_power != NULL) {
+-        int rc = ext_power_enable(ext_power);
+-        if (rc != 0) {
+-            LOG_ERR("Unable to enable EXT_POWER: %d", rc);
+-        }
+-    }
+-#endif
+-
+     state.on = true;
+     state.animation_step = 0;
+-    k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(50));
++    rgb_update_output();
+ 
+     return zmk_rgb_underglow_save_state();
+ }
+ 
+ static void zmk_rgb_underglow_off_handler(struct k_work *work) {
++    if (rgb_is_lit()) {
++        return;
++    }
+     for (int i = 0; i < STRIP_NUM_PIXELS; i++) {
+         pixels[i] = (struct led_rgb){r : 0, g : 0, b : 0};
+     }
+@@ -327,23 +327,36 @@
+ 
+ K_WORK_DEFINE(underglow_off_work, zmk_rgb_underglow_off_handler);
+ 
+-int zmk_rgb_underglow_off(void) {
+-    if (!led_strip)
+-        return -ENODEV;
++static int rgb_update_output(void) {
++    bool lit = rgb_is_lit();
+ 
++    k_timer_stop(&underglow_tick);
++    k_work_cancel(&underglow_tick_work);
++    if (!lit) {
++        k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &underglow_off_work);
++    } else {
++        k_work_cancel(&underglow_off_work);
++    }
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_EXT_POWER)
+     if (ext_power != NULL) {
+-        int rc = ext_power_disable(ext_power);
++        int rc = lit ? ext_power_enable(ext_power) : ext_power_disable(ext_power);
+         if (rc != 0) {
+-            LOG_ERR("Unable to disable EXT_POWER: %d", rc);
++            LOG_ERR("Unable to update EXT_POWER: %d", rc);
++            return rc;
+         }
+     }
+ #endif
++    if (lit) {
++        k_timer_start(&underglow_tick, K_NO_WAIT, K_MSEC(50));
++    }
++    return 0;
++}
+ 
+-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &underglow_off_work);
+-
+-    k_timer_stop(&underglow_tick);
++int zmk_rgb_underglow_off(void) {
++    if (!led_strip)
++        return -ENODEV;
+     state.on = false;
++    rgb_update_output();
+ 
+     return zmk_rgb_underglow_save_state();
+ }
+@@ -462,46 +475,30 @@
+ 
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE) ||                                          \
+     IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
+-struct rgb_underglow_sleep_state {
+-    bool is_awake;
+-    bool rgb_state_before_sleeping;
+-};
+-
+-static int rgb_underglow_auto_state(bool target_wake_state) {
+-    static struct rgb_underglow_sleep_state sleep_state = {
+-        is_awake : true,
+-        rgb_state_before_sleeping : false
+-    };
+-
+-    // wake up event while awake, or sleep event while sleeping -> no-op
+-    if (target_wake_state == sleep_state.is_awake) {
++int charybdis_rgb_update_power_state(void) {
++    if (!led_strip) {
++        return -ENODEV;
++    }
++    bool suspend = !charybdis_vbus_is_powered() &&
++                   zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE;
++    if (rgb_suspended == suspend) {
+         return 0;
+     }
+-    sleep_state.is_awake = target_wake_state;
+-
+-    if (sleep_state.is_awake) {
+-        if (sleep_state.rgb_state_before_sleeping) {
+-            return zmk_rgb_underglow_on();
+-        } else {
+-            return zmk_rgb_underglow_off();
+-        }
+-    } else {
+-        sleep_state.rgb_state_before_sleeping = state.on;
+-        return zmk_rgb_underglow_off();
+-    }
++    rgb_suspended = suspend;
++    return rgb_update_output();
+ }
+ 
+ static int rgb_underglow_event_listener(const zmk_event_t *eh) {
+ 
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_IDLE)
+     if (as_zmk_activity_state_changed(eh)) {
+-        return rgb_underglow_auto_state(zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE);
++        return charybdis_rgb_update_power_state();
+     }
+ #endif
+ 
+ #if IS_ENABLED(CONFIG_ZMK_RGB_UNDERGLOW_AUTO_OFF_USB)
+     if (as_zmk_usb_conn_state_changed(eh)) {
+-        return rgb_underglow_auto_state(zmk_usb_is_powered());
++        return charybdis_rgb_update_power_state();
+     }
+ #endif

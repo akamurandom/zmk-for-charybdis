@@ -1,5 +1,18 @@
 on: [push, pull_request, workflow_dispatch]
 
 jobs:
+  policy-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch ZMK v0.3 sources for policy tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/zmk-v0.3"
+          for source in activity.c rgb_underglow.c; do
+            curl -fsSL "https://raw.githubusercontent.com/zmkfirmware/zmk/v0.3/app/src/$source" -o "$RUNNER_TEMP/zmk-v0.3/$source"
+          done
+      - name: Test RGB and deep-sleep transitions
+        run: python3 tests/test_vbus_policy.py --zmk-source "$RUNNER_TEMP/zmk-v0.3"
   build:
+    needs: policy-tests
     uses: zmkfirmware/zmk/.github/workflows/build-user-config.yml@v0.3
