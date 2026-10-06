@@ -1,7 +1,7 @@
 config CHARYBDIS_VBUS_POWER
-    bool "Use common RGB idle policy and nRF52840 VBUS sleep control"
+    bool "Use nRF52840 VBUS for RGB idle and sleep control on both halves"
     depends on SOC_NRF52840 && ZMK_RGB_UNDERGLOW
     help
-      RGB turns off when idle regardless of the power source. VBUS
-      prevents deep sleep on both halves while USB power is present.
-      Manual RGB on/off and saved lighting settings are preserved.
+      USB power prevents RGB idle shutoff and deep sleep. On battery,
+      the normal ZMK idle and sleep timeouts apply. Manual RGB on/off
+      and saved lighting settings are preserved.

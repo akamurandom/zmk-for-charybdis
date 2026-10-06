@@ -77,25 +77,22 @@ static void check_output(bool expected) {
     assert(animation_on == expected);
 }
 int main(void) {
-    // USB: idle extinguishes RGB, but does not put the keyboard to sleep.
+    // User on: USB idle and long idle never extinguish or sleep.
     vbus = true;
     activity_state = ZMK_ACTIVITY_ACTIVE;
     assert(zmk_rgb_underglow_on() == 0);
     check_output(true);
     int initial_saves = save_count;
-    now = 29000;
-    activity_work_handler(NULL);
-    check_output(true);
     now = 31000;
     activity_work_handler(NULL);
     assert(activity_state == ZMK_ACTIVITY_IDLE);
-    check_output(false);
+    check_output(true);
     now = 901000;
     activity_work_handler(NULL);
     assert(sleep_count == 0);
-    check_output(false);
+    check_output(true);
 
-    // Removing USB during IDLE does not alter RGB or its saved preference.
+    // Removal during IDLE must be caught even without an activity event.
     vbus = false;
     now = 32000;
     activity_work_handler(NULL);
@@ -108,13 +105,13 @@ int main(void) {
     activity_work_handler(NULL);
     assert(output_count == previous_output_count); // stable state is a no-op
 
-    // Restoring power during IDLE must not relight RGB or save settings.
+    // Power restored while still idle resumes without writing settings.
     vbus = true;
     activity_work_handler(NULL);
-    check_output(false);
+    check_output(true);
     assert(save_count == initial_saves);
 
-    // Battery: input wakes RGB, and the same 30-second timeout suspends it.
+    // On battery, input wakes RGB; idle suspends it again, without saving.
     vbus = false;
     set_state(ZMK_ACTIVITY_ACTIVE);
     activity_last_uptime = now;
@@ -149,8 +146,6 @@ int main(void) {
     initial_saves = save_count;
     vbus = true;
     charybdis_rgb_update_power_state();
-    check_output(false);
-    set_state(ZMK_ACTIVITY_ACTIVE);
     check_output(true);
     assert(save_count == initial_saves);
 
@@ -166,7 +161,7 @@ int main(void) {
     assert(sleep_count == 1 && activity_state == ZMK_ACTIVITY_SLEEP);
     check_output(false);
     assert(state.on && save_count == initial_saves);
-    puts("RGB idle policy on USB and battery: all transition checks passed");
+    puts("VBUS RGB/sleep policy: all transition checks passed");
 }
 """
 
